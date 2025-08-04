@@ -11,7 +11,7 @@ Check and Update the Housekeeper Bee Web APP to the latest version
 
 3. Change the shell script to executable      
     > cd ~/Desktop/HousekeeperBeeWebAppUpdate   
-    > chomd +x update_version.sh
+    > chmod +x update_version.sh
 
 4. run the script
 
