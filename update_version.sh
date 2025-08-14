@@ -1,7 +1,96 @@
 #!/bin/bash
-#==========================================================================================
-# init
-#==========================================================================================
+
+#============== Constants ==============
+LOCAL_TARGET_FILE="app_version.json"
+LST_UPD_FILE="current_app_version.json"
+GIT_PATH="https://raw.githubusercontent.com/Thomas-Leung-852/HousekeeperBeeWebApp/main"
+GDRIVE_FILE_ID="1u_jXIKHBDScf-2XHuoybkJ4XxPLyk9wd"
+GDRIVE_URL="https://drive.google.com/uc?export=download&id=$GDRIVE_FILE_ID"
+
+#============== Function :: inital global variables ==============
+
+init_global_var(){
+  g_app_fn=$(find ~/Desktop/ -name "housekeeper-0.0.1-SNAPSHOT.jar" | grep "housekeeping_bee/files/prog" | grep -Ev "_BACKUP" ) 
+  g_app_path="$(dirname "${g_app_fn}")"
+  g_app_install_path=$(echo "${g_app_path}" | sed 's@/housekeeping_bee/files/prog@@g' )
+}
+
+#============== Function :: Get latest version metadata ==============
+
+get_latest_ver_profile(){
+    curl -L "$GDRIVE_URL" -o "$LOCAL_TARGET_FILE"
+
+    if [ ! -e $LOCAL_TARGET_FILE ]; then
+      echo "ERROR: ${LOCAL_TARGET_FILE} not found!"
+      return 1
+    fi
+
+    local json_content=$(cat "$LOCAL_TARGET_FILE")
+    local filelist=$(echo "$json_content" | jq -r '.filelist // "unknown"')
+
+    if [ "${filelist}" = "unknown" ]; then
+      echo "ERROR: file list not found!"
+      return 1
+    fi
+
+    return 0
+}
+
+#============== Function :: Backup file ==============
+
+do_backup(){
+   local backup_datetime=$(date +'%Y%m%d%H%M%S')
+
+   if [ -e $LOCAL_TARGET_FILE ]; then
+      jq -c '.filelist[]' $LOCAL_TARGET_FILE | while read -r path_obj; do
+         local path=$(echo "$path_obj" | jq -r '.filepath')
+         local filename=$(echo "$path_obj" | jq -r '.filename')
+         local src_filepath="${g_app_install_path}${path}"
+         local backup_filepath="backup/${backup_datetime}_BACKUP${src_filepath}"
+
+         mkdir -p "${backup_filepath}"
+         cp "${src_filepath}${filename}" "${backup_filepath}${filename}"
+       done
+   else
+       echo "ERROR: Cannot found ${LOCAL_TARGET_FILE} file"
+       return 1
+   fi
+
+   return 0
+}
+
+#============== Function :: Download file from github repository and update local files ==============
+
+update_from_github(){
+   if [ -e $LOCAL_TARGET_FILE ]; then
+      jq -c '.filelist[]' $LOCAL_TARGET_FILE | while read -r path_obj; do
+         local path=$(echo "$path_obj" | jq -r '.filepath')
+         local filename=$(echo "$path_obj" | jq -r '.filename')
+
+         local full_git_path="${GIT_PATH}${path}"
+         local dest_filepath="${g_app_install_path}${path}"
+
+         #echo "${full_git_path}${filename}"  
+         #echo "${dest_filepath}${filename}"
+
+         echo "> Update file: ${dest_filepath}${filename}"
+         echo
+         curl -0 "${full_git_path}${filename}" > "${dest_filepath}~${filename}"
+         rm "${dest_filepath}${filename}"
+         mv "${dest_filepath}~${filename}" "${dest_filepath}${filename}" 
+       done
+   else
+       echo "ERROR: Cannot found ${LOCAL_TARGET_FILE} file"
+       return 1
+   fi 
+
+   return 0
+}
+
+
+#************************************************************************************
+#* Main
+#************************************************************************************
 
 echo
 echo
@@ -9,17 +98,9 @@ echo "**************************************************************************
 echo "* Introducing the Housekeeper Bee Web App Update Tool: "
 echo "* easily check for the latest version of Housekeeper Bee Web App, and download updates for efficient housekeeping management. "
 echo "* Keep your app up to date effortlessly!"
+echo "* Version: 1.1 "
 echo "***********************************************************************************************************************************"
 echo 
-
-app_fn=$(find ~/Desktop/ -name "housekeeper-0.0.1-SNAPSHOT.jar" | grep "housekeeping_bee/files/prog" ) 
-
-if [ -z $app_fn ]; then
-   echo "Error: Housekeeper Bee Web App does not exist! Download from https://github.com/Thomas-Leung-852/HousekeeperBeeWebApp"
-   echo
-   exit 1
-fi 
-
 
 ## Check if jq is installed
 if ! command -v jq &> /dev/null; then
@@ -27,114 +108,56 @@ if ! command -v jq &> /dev/null; then
     exit 1
 fi
 
-## Create folder if missing
-TMP_FOLDER_NAME="tmp"
+## inital global variables
+init_global_var
 
-if [ ! -d "$TMP_FOLDER_NAME" ]; then
-   mkdir $TMP_FOLDER_NAME
-fi
-
-#==========================================================================================
-# get version info 
-#==========================================================================================
-
-echo "Download latest version profile...."
-echo
-
-GDRIVE_FILE_ID="1u_jXIKHBDScf-2XHuoybkJ4XxPLyk9wd"
-GDRIVE_URL="https://drive.google.com/uc?export=download&id=$GDRIVE_FILE_ID"
-LOCAL_TARGET_FILE="app_version.json"
-
-curl -L "$GDRIVE_URL" -o "$LOCAL_TARGET_FILE"
-
-echo
-echo "Comparing versions ..."
-
-new_app_ver="unknown"
-
-if [ ! -f "$LOCAL_TARGET_FILE" ]; then
-    echo "Error: Get update info failure!"
-    exit 1
-else
-    json_content=$(cat "$LOCAL_TARGET_FILE")
-
-    new_app_ver=$(echo "$json_content" | jq -r '.version // "unknown"')
-    file_id=$(echo "$json_content" | jq -r '.file_id // "unknown"')
-    checksum=$(echo "$json_content" | jq -r '.checksum // "unknown"')
-fi
-
-if [ "$new_app_ver" = "unknown" ]; then
-   echo "Error: Invalid update info!"
+if [ -z $g_app_fn ]; then
+   echo "Error: Housekeeper Bee Web App does not exist! Download from https://github.com/Thomas-Leung-852/HousekeeperBeeWebApp"
+   echo
    exit 1
 fi
 
-if [ "$file_id" = "unknown" ]; then
-    echo "Warning: No file id field found in JSON"
-    exit 1
-fi
+echo "<< download latest app version profile >>" | get_latest_ver_profile 
 
-if [ "$checksum" = "unknown" ]; then
-    echo "Warning: No checksum field found in JSON"
-    exit 1
-fi
+if [[ $? -ne 0 ]]; then rm "${LOCAL_TARGET_FILE}"; exit 1; fi   # Exit if error
 
 #==========================================================================================
-# get last update info
+# compare versions
 #==========================================================================================
-
-LST_UPD_FILE="current_app_version.json"
+latest_app_ver=$(jq -r '.version // "unknown"' $LOCAL_TARGET_FILE)
 
 cur_app_ver="0.0.0"
 
 if [ -f "$LST_UPD_FILE" ]; then
-   cur_json_content=$(cat "$LST_UPD_FILE")
-   cur_app_ver=$(echo "$cur_json_content" | jq -r '.version // "0.0.0"')
+  cur_json_content=$(cat "$LST_UPD_FILE")
+  cur_app_ver=$(echo "$cur_json_content" | jq -r '.version // "0.0.0"')
 fi
 
-if [ ! "$cur_app_ver" = "$new_app_ver" ]; then
-   echo "Version needs update: $cur_app_ver -> $new_app_ver"
+if [ ! "$cur_app_ver" = "$latest_app_ver" ]; then
+   echo
+   echo "Version needs update: $cur_app_ver -> $latest_app_ver"
+   
+   echo
+   echo "<< Backup files >>" | do_backup
+   if [[ $? -ne 0 ]]; then rm "${LOCAL_TARGET_FILE}"; exit 1; fi   # Exit if error
 
-   FILE="./tmp/housekeeper-0.0.1-SNAPSHOT.jar"
+   echo
+   echo "<< Update files from GitHub >>" | update_from_github
+   if [[ $? -ne 0 ]]; then rm "${LOCAL_TARGET_FILE}"; exit 1; fi   # Exit if error
 
-   curl -L "https://drive.usercontent.google.com/download?id=${file_id}&confirm=xxx" -o $FILE
+   cp "${LOCAL_TARGET_FILE}" "${LST_UPD_FILE}"                  # Update current version profile
+   rm "${LOCAL_TARGET_FILE}"                                    # Delete app_version.json
 
-   dln_fn_checksum=$(sha256sum $FILE | cut -d' ' -f1)
-
-   if [ "$checksum" = "$dln_fn_checksum" ]; then
-   	#path_name=$(dirname "$fn")
-
-        echo "---------------------------------------------"
-	echo "Do backup and Update app                     "
-        echo "---------------------------------------------"
-
-        current_fn_checksum=$(sha256sum $app_fn | cut -d' ' -f1)
-
-	mkdir -p backup
-	cp "${app_fn}" "./backup/${current_fn_checksum}.jar"	# Backup file
-        cp "${FILE}" "${app_fn}"				# Update jar file
-        cp "${LOCAL_TARGET_FILE}" "${LST_UPD_FILE}"		# Update current version profile
-        rm "${LOCAL_TARGET_FILE}"				# Delete app_version.json
-        rm $FILE						# Delete downloaded file
-	echo "Update Completed."
-        read -n 1 -s -r -p "Press any key to reboot..."		# Wait
-	echo  							# Add a newline after keypress
-        sudo reboot
-   else
-      echo "File checksum problem!"
-      exit 1 
-   fi
+   echo "Update Completed."
+   read -n 1 -s -r -p "Press any key to reboot..."              # Wait
+   
+   echo                                                         # Add a newline after keypress
+   sudo reboot                                                 # reboot to apply the changes
 else
-    echo "Version is already up to date (ver $new_app_ver)"
-    echo
-    rm "${LOCAL_TARGET_FILE}"				# Delete app_version.json
+   echo "Version is already up to date (ver $latest_app_ver)"
+   echo
+   rm "${LOCAL_TARGET_FILE}"                                       # Delete app_version.json
 fi
-
-
-exit 0
-
-
-
-
 
 
 
