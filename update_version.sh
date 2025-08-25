@@ -78,6 +78,9 @@ update_from_github(){
          curl -0 "${full_git_path}${filename}" > "${dest_filepath}~${filename}"
          rm "${dest_filepath}${filename}"
          mv "${dest_filepath}~${filename}" "${dest_filepath}${filename}" 
+         if file "${dest_filepath}${filename}" | grep -q "shell script"; then
+            chmod +x "${dest_filepath}${filename}"
+         fi
        done
    else
        echo "ERROR: Cannot found ${LOCAL_TARGET_FILE} file"
