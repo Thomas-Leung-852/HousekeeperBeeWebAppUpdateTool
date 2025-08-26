@@ -70,9 +70,6 @@ update_from_github(){
          local full_git_path="${GIT_PATH}${path}"
          local dest_filepath="${g_app_install_path}${path}"
 
-         #echo "${full_git_path}${filename}"  
-         #echo "${dest_filepath}${filename}"
-
          echo "> Update file: ${dest_filepath}${filename}"
          echo
          curl -0 "${full_git_path}${filename}" > "${dest_filepath}~${filename}"
@@ -81,6 +78,26 @@ update_from_github(){
          if file "${dest_filepath}${filename}" | grep -q "shell script"; then
             chmod +x "${dest_filepath}${filename}"
          fi
+       done
+   else
+       echo "ERROR: Cannot found ${LOCAL_TARGET_FILE} file"
+       return 1
+   fi 
+
+   return 0
+}
+
+#============== Function :: Execute Commands ==============
+
+exec_cmd(){
+   if [ -e $LOCAL_TARGET_FILE ]; then
+      jq -c '.commandlist[]' $LOCAL_TARGET_FILE | while read -r cmd_obj; do
+         local desc=$(echo "$cmd_obj" | jq -r '.description')
+         local cmd=$(echo "$cmd_obj" | jq -r '.command')
+
+         echo "> Command Description: ${desc}"
+         echo
+         eval "${cmd}"
        done
    else
        echo "ERROR: Cannot found ${LOCAL_TARGET_FILE} file"
@@ -101,7 +118,7 @@ echo "**************************************************************************
 echo "* Introducing the Housekeeper Bee Web App Update Tool: "
 echo "* easily check for the latest version of Housekeeper Bee Web App, and download updates for efficient housekeeping management. "
 echo "* Keep your app up to date effortlessly!"
-echo "* Version: 1.1 "
+echo "* Version: 1.2 "
 echo "***********************************************************************************************************************************"
 echo 
 
@@ -148,9 +165,14 @@ if [ ! "$cur_app_ver" = "$latest_app_ver" ]; then
    echo "<< Update files from GitHub >>" | update_from_github
    if [[ $? -ne 0 ]]; then rm "${LOCAL_TARGET_FILE}"; exit 1; fi   # Exit if error
 
+   echo
+   echo "<< Execute Commands >>" | exec_cmd                        
+   if [[ $? -ne 0 ]]; then rm "${LOCAL_TARGET_FILE}"; exit 1; fi   # Exit if error
+
    cp "${LOCAL_TARGET_FILE}" "${LST_UPD_FILE}"                  # Update current version profile
    rm "${LOCAL_TARGET_FILE}"                                    # Delete app_version.json
 
+   echo
    echo "Update Completed."
    read -n 1 -s -r -p "Press any key to reboot..."              # Wait
    
