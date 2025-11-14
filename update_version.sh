@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 
 #============== Constants ==============
 LOCAL_TARGET_FILE="app_version.json"
@@ -6,6 +6,27 @@ LST_UPD_FILE="current_app_version.json"
 GIT_PATH="https://raw.githubusercontent.com/Thomas-Leung-852/HousekeeperBeeWebApp/main"
 GDRIVE_FILE_ID="1u_jXIKHBDScf-2XHuoybkJ4XxPLyk9wd"
 GDRIVE_URL="https://drive.google.com/uc?export=download&id=$GDRIVE_FILE_ID"
+
+#============== Prepare parameters array ==============
+
+# Declare an associative array
+declare -A g_params
+
+# Loop through all arguments
+for arg in "$@"; do
+    # Check if the argument contains an equals sign, indicating a key-value pair
+    if [[ "$arg" == *"="* ]]; then
+        # Split the argument into key and value
+        key="${arg%%=*}" # Everything before the first '='
+        value="${arg#*=}" # Everything after the first '='
+        g_params["$key"]="$value"
+    else
+        # Handle arguments without an equals sign (e.g., positional arguments or flags)
+        # For simplicity, this example assigns a default value or handles them as keys with empty values.
+        # You might want to implement more specific logic here based on your needs.
+        g_params["$arg"]="" # Assign an empty value for arguments without '='
+    fi
+done
 
 #============== Function :: inital global variables ==============
 
@@ -70,7 +91,7 @@ update_from_github(){
          local full_git_path="${GIT_PATH}${path}"
          local dest_filepath="${g_app_install_path}${path}"
 
-         echo "> Update file: ${dest_filepath}${filename}"
+         echo "> Updating file: ${dest_filepath}${filename}"
          echo
          curl -0 "${full_git_path}${filename}" > "${dest_filepath}~${filename}"
          rm "${dest_filepath}${filename}"
@@ -97,12 +118,22 @@ exec_cmd(){
 
          echo "> Command Description: ${desc}"
          echo
-         eval "${cmd}"
+#            eval "echo $HOUSEKEEPER_BEE_PWD_SUDO | ${cmd} "   # e.g. sudo ufw allow 8080 with sudo
+
+
+         if [[ "${g_params["from"]}" == "terminal" ]]; then
+            eval "echo '${g_params["pwd"]}' | sudo -S ${cmd} "   # e.g. sudo ufw allow 8080 with sudo
+         else
+	    # default from web
+            cmd="${cmd/sudo /}"
+            eval "echo $HOUSEKEEPER_BEE_PWD_SUDO | sudo -S ${cmd} "   # e.g. ufw allow 8080 without sudo
+         fi
+
        done
    else
        echo "ERROR: Cannot found ${LOCAL_TARGET_FILE} file"
        return 1
-   fi 
+   fi
 
    return 0
 }
@@ -118,7 +149,7 @@ echo "**************************************************************************
 echo "* Introducing the Housekeeper Bee Web App Update Tool: "
 echo "* easily check for the latest version of Housekeeper Bee Web App, and download updates for efficient housekeeping management. "
 echo "* Keep your app up to date effortlessly!"
-echo "* Version: 1.2 "
+echo "* Version: 1.3 "
 echo "***********************************************************************************************************************************"
 echo 
 
@@ -153,6 +184,10 @@ if [ -f "$LST_UPD_FILE" ]; then
   cur_app_ver=$(echo "$cur_json_content" | jq -r '.version // "0.0.0"')
 fi
 
+if [[ "${g_params["force-update"]}" == "yes" ]]; then
+  cur_app_ver="0.0.0"
+fi
+
 if [ ! "$cur_app_ver" = "$latest_app_ver" ]; then
    echo
    echo "Version needs update: $cur_app_ver -> $latest_app_ver"
@@ -174,10 +209,27 @@ if [ ! "$cur_app_ver" = "$latest_app_ver" ]; then
 
    echo
    echo "Update Completed."
-   read -n 1 -s -r -p "Press any key to reboot..."              # Wait
-   
-   echo                                                         # Add a newline after keypress
-   sudo reboot                                                 # reboot to apply the changes
+
+   echo
+   echo "Backup folders older than 30 days is deleting..."
+   ./del_old_backup.sh
+
+
+   if [[ "${g_params["slient"]}" == "yes" ]]; then
+      echo "Preparing reboot (1 minute)...You need logout and login again after reboot!"
+
+         if [[ "${g_params["from"]}" == "terminal" ]]; then
+            eval "echo '${g_params["pwd"]}' | sudo -S sudo shutdown -r +1 "
+         else
+            echo $HOUSEKEEPER_BEE_PWD_SUDO | sudo -S -k shutdown -r +1
+         fi
+   else
+      echo                                                         # Add a newline after keypress
+      read -n 1 -s -r -p "Press any key to reboot..."              # Wait
+      echo                                                         # Add a newline after keypress
+      sudo reboot                                                 # reboot to apply the changes
+   fi
+
 else
    echo "Version is already up to date (ver $latest_app_ver)"
    echo
